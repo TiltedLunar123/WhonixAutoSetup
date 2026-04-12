@@ -1,0 +1,17 @@
+# Downloaded OVA images and installers
+downloads/
+*.ova
+*.vbox-extpack
+VirtualBox-*.exe
+
+# Log files
+logs/
+*.log
+
+# Windows / IDE artifacts
+Thumbs.db
+desktop.ini
+.vs/
+*.suo
+*.user
+.vscode/

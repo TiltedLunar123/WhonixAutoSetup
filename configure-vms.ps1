@@ -1,0 +1,347 @@
+#Requires -Version 5.1
+#Requires -RunAsAdministrator
+<#
+.SYNOPSIS
+    Configures Whonix Gateway and Workstation VMs with optimal resources and security hardening.
+.DESCRIPTION
+    Dynamically allocates RAM/CPU based on host specs, sets up networking
+    (NAT + internal for Gateway, internal-only for Workstation), and applies
+    VirtualBox security hardening: clipboard isolation, no shared folders,
+    no USB passthrough, audio disabled, 3D acceleration disabled.
+.EXAMPLE
+    .\configure-vms.ps1
+#>
+
+[CmdletBinding()]
+param(
+    [string]$GatewayVMName = "Whonix-Gateway-Xfce",
+    [string]$WorkstationVMName = "Whonix-Workstation-Xfce",
+    [string]$InternalNetworkName = "Whonix"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+. (Join-Path $PSScriptRoot "lib" "logging.ps1")
+
+# ============================================================
+# Helper: Find VBoxManage.exe
+# ============================================================
+function Find-VBoxManage {
+    $searchPaths = @(
+        (Join-Path $env:ProgramFiles "Oracle\VirtualBox\VBoxManage.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Oracle\VirtualBox\VBoxManage.exe")
+    )
+
+    $envPath = $env:VBOX_MSI_INSTALL_PATH
+    if ($envPath) {
+        $searchPaths = @(Join-Path $envPath "VBoxManage.exe") + $searchPaths
+    }
+
+    $envPath2 = $env:VBOX_INSTALL_PATH
+    if ($envPath2) {
+        $searchPaths = @(Join-Path $envPath2 "VBoxManage.exe") + $searchPaths
+    }
+
+    foreach ($p in $searchPaths) {
+        if (Test-Path $p) { return $p }
+    }
+
+    $inPath = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
+    if ($inPath) { return $inPath.Source }
+
+    return $null
+}
+
+# ============================================================
+# Helper: Run VBoxManage command with logging
+# ============================================================
+function Invoke-VBoxManage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$VBoxManage,
+        [Parameter(Mandatory)] [string[]]$Arguments,
+        [string]$Description = ""
+    )
+
+    if ($Description) { Write-Log "  $Description" -Level DEBUG }
+
+    $output = & $VBoxManage $Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $errorText = $output | Out-String
+        Write-Log "  VBoxManage error: $errorText" -Level ERROR
+        throw "VBoxManage command failed: $Arguments"
+    }
+    return $output
+}
+
+# ============================================================
+# Calculate resource allocation
+# ============================================================
+function Get-ResourceAllocation {
+    Write-Banner "Detecting System Resources"
+
+    $totalRamBytes = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
+    $totalRamMB = [math]::Floor($totalRamBytes / 1MB)
+    $totalRamGB = [math]::Round($totalRamBytes / 1GB, 1)
+
+    $cpuCores = (Get-CimInstance -ClassName Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+
+    Write-Log "Total RAM: $totalRamGB GB ($totalRamMB MB)"
+    Write-Log "Total CPU cores: $cpuCores"
+
+    # Gateway: fixed 1 core, 1024 MB
+    $gwCores = 1
+    $gwRamMB = 1024
+
+    # Workstation: scale based on available resources
+    # Reserve 4GB + gateway allocation for the host OS
+    $hostReserveMB = 4096
+    $availableRamMB = $totalRamMB - $hostReserveMB - $gwRamMB
+    $availableCores = $cpuCores - $gwCores - 1  # leave 1 core for host
+
+    if ($availableCores -lt 1) { $availableCores = 1 }
+
+    # Allocate 25-40% of remaining RAM depending on total
+    if ($totalRamGB -ge 32) {
+        $wsRamMB = [math]::Floor($availableRamMB * 0.40)
+        $wsCores = [math]::Min($availableCores, 4)
+    }
+    elseif ($totalRamGB -ge 16) {
+        $wsRamMB = [math]::Floor($availableRamMB * 0.33)
+        $wsCores = [math]::Min($availableCores, 3)
+    }
+    else {
+        $wsRamMB = [math]::Floor($availableRamMB * 0.25)
+        $wsCores = [math]::Min($availableCores, 2)
+    }
+
+    # Enforce minimums and round to nearest 128MB
+    if ($wsRamMB -lt 2048) { $wsRamMB = 2048 }
+    $wsRamMB = [math]::Floor($wsRamMB / 128) * 128
+
+    # Cap at reasonable maximums
+    if ($wsRamMB -gt 8192) { $wsRamMB = 8192 }
+    if ($wsCores -gt 4) { $wsCores = 4 }
+
+    $allocation = @{
+        GatewayCores     = $gwCores
+        GatewayRamMB     = $gwRamMB
+        WorkstationCores = $wsCores
+        WorkstationRamMB = $wsRamMB
+    }
+
+    Write-Log "Resource allocation plan:" -Level INFO
+    Write-Log "  Gateway:     $gwCores core(s), $gwRamMB MB RAM" -Level INFO
+    Write-Log "  Workstation: $wsCores core(s), $wsRamMB MB RAM" -Level INFO
+    Write-Log "  Host reserve: ~$hostReserveMB MB RAM, 1 core" -Level INFO
+
+    return $allocation
+}
+
+# ============================================================
+# Configure Gateway VM
+# ============================================================
+function Set-GatewayConfiguration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$VBoxManage,
+        [Parameter(Mandatory)] [hashtable]$Allocation
+    )
+
+    Write-Banner "Configuring Whonix Gateway"
+
+    $vmName = $GatewayVMName
+
+    # Ensure VM is powered off
+    $vmInfo = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $vmName, "--machinereadable") -Description "Reading VM state"
+    $stateMatch = ($vmInfo | Out-String) -match 'VMState="([^"]+)"'
+    if ($stateMatch -and $Matches[1] -ne "poweroff") {
+        Write-Log "Gateway VM is running. Powering off..." -Level WARN
+        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("controlvm", $vmName, "poweroff") -Description "Powering off Gateway"
+        Start-Sleep -Seconds 3
+    }
+
+    # CPU and RAM
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $vmName,
+        "--cpus", $Allocation.GatewayCores.ToString(),
+        "--memory", $Allocation.GatewayRamMB.ToString()
+    ) -Description "Setting CPU ($($Allocation.GatewayCores)) and RAM ($($Allocation.GatewayRamMB) MB)"
+
+    # Network: Adapter 1 = NAT, Adapter 2 = Internal Network "Whonix"
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $vmName,
+        "--nic1", "nat",
+        "--nic2", "intnet",
+        "--intnet2", $InternalNetworkName
+    ) -Description "Setting network adapters (NAT + Internal '$InternalNetworkName')"
+
+    # Security hardening
+    Apply-SecurityHardening -VBoxManage $VBoxManage -VMName $vmName
+
+    Write-Log "Gateway configuration complete." -Level SUCCESS
+}
+
+# ============================================================
+# Configure Workstation VM
+# ============================================================
+function Set-WorkstationConfiguration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$VBoxManage,
+        [Parameter(Mandatory)] [hashtable]$Allocation
+    )
+
+    Write-Banner "Configuring Whonix Workstation"
+
+    $vmName = $WorkstationVMName
+
+    # Ensure VM is powered off
+    $vmInfo = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $vmName, "--machinereadable") -Description "Reading VM state"
+    $stateMatch = ($vmInfo | Out-String) -match 'VMState="([^"]+)"'
+    if ($stateMatch -and $Matches[1] -ne "poweroff") {
+        Write-Log "Workstation VM is running. Powering off..." -Level WARN
+        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("controlvm", $vmName, "poweroff") -Description "Powering off Workstation"
+        Start-Sleep -Seconds 3
+    }
+
+    # CPU and RAM
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $vmName,
+        "--cpus", $Allocation.WorkstationCores.ToString(),
+        "--memory", $Allocation.WorkstationRamMB.ToString()
+    ) -Description "Setting CPU ($($Allocation.WorkstationCores)) and RAM ($($Allocation.WorkstationRamMB) MB)"
+
+    # Network: Adapter 1 = Internal Network "Whonix" ONLY (no NAT, no internet bypass)
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $vmName,
+        "--nic1", "intnet",
+        "--intnet1", $InternalNetworkName,
+        "--nic2", "none"
+    ) -Description "Setting network adapter (Internal '$InternalNetworkName' only)"
+
+    # Security hardening
+    Apply-SecurityHardening -VBoxManage $VBoxManage -VMName $vmName
+
+    Write-Log "Workstation configuration complete." -Level SUCCESS
+}
+
+# ============================================================
+# Security hardening (applied to both VMs)
+# ============================================================
+function Apply-SecurityHardening {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$VBoxManage,
+        [Parameter(Mandatory)] [string]$VMName
+    )
+
+    Write-Log "Applying security hardening to $VMName..." -Level INFO
+
+    # Disable clipboard sharing
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--clipboard-mode", "disabled"
+    ) -Description "Disabling clipboard sharing"
+
+    # Disable drag-and-drop
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--drag-and-drop", "disabled"
+    ) -Description "Disabling drag-and-drop"
+
+    # Disable shared folders (remove any that exist)
+    try {
+        $sfOutput = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $VMName, "--machinereadable")
+        $sharedFolders = $sfOutput | Select-String -Pattern 'SharedFolderNameMachineMapping\d+="([^"]+)"'
+        foreach ($sf in $sharedFolders) {
+            $folderName = $sf.Matches[0].Groups[1].Value
+            Write-Log "  Removing shared folder: $folderName" -Level WARN
+            Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+                "sharedfolder", "remove", $VMName, "--name", $folderName
+            )
+        }
+    }
+    catch {
+        Write-Log "  No shared folders to remove." -Level DEBUG
+    }
+
+    # Disable USB controllers
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--usb", "off"
+    ) -Description "Disabling USB 1.1"
+
+    try {
+        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+            "modifyvm", $VMName, "--usbehci", "off"
+        ) -Description "Disabling USB 2.0 (EHCI)"
+    }
+    catch { Write-Log "  USB 2.0 controller not present, skipping." -Level DEBUG }
+
+    try {
+        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+            "modifyvm", $VMName, "--usbxhci", "off"
+        ) -Description "Disabling USB 3.0 (xHCI)"
+    }
+    catch { Write-Log "  USB 3.0 controller not present, skipping." -Level DEBUG }
+
+    # Disable audio
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--audio-enabled", "off"
+    ) -Description "Disabling audio"
+
+    # Disable 3D acceleration
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--graphicscontroller", "vmsvga",
+        "--accelerate3d", "off"
+    ) -Description "Disabling 3D acceleration (VMSVGA)"
+
+    # Enable nested paging for performance + security
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--nested-hw-virt", "off",
+        "--largepages", "on"
+    ) -Description "Enabling large pages, disabling nested HW virtualization"
+
+    # Disable remote desktop
+    Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+        "modifyvm", $VMName, "--vrde", "off"
+    ) -Description "Disabling VRDE (remote desktop)"
+
+    Write-Log "Security hardening applied to $VMName." -Level SUCCESS
+}
+
+# ============================================================
+# Main Execution
+# ============================================================
+try {
+    Write-Banner "WhonixAutoSetup - VM Configuration"
+
+    $vboxManage = Find-VBoxManage
+    if (-not $vboxManage) {
+        throw "VBoxManage.exe not found. Run setup.ps1 first to install VirtualBox."
+    }
+    Write-Log "Using VBoxManage: $vboxManage"
+
+    # Verify VMs exist
+    $vmList = & $vboxManage list vms 2>&1 | Out-String
+    if ($vmList -notmatch [regex]::Escape($GatewayVMName)) {
+        throw "VM '$GatewayVMName' not found. Run setup.ps1 first to import Whonix OVAs."
+    }
+    if ($vmList -notmatch [regex]::Escape($WorkstationVMName)) {
+        throw "VM '$WorkstationVMName' not found. Run setup.ps1 first to import Whonix OVAs."
+    }
+
+    $allocation = Get-ResourceAllocation
+
+    Set-GatewayConfiguration -VBoxManage $vboxManage -Allocation $allocation
+    Set-WorkstationConfiguration -VBoxManage $vboxManage -Allocation $allocation
+
+    Write-Banner "Configuration Complete"
+    Write-Log "Both VMs are configured and hardened." -Level SUCCESS
+    Write-Log "Next step: Run .\start-whonix.ps1 to launch the VMs."
+    Write-Log "Log file: $(Get-LogFilePath)"
+}
+catch {
+    Write-Log "CONFIGURATION FAILED: $_" -Level ERROR
+    Write-Log "Check the log file for details: $(Get-LogFilePath)" -Level ERROR
+    exit 1
+}
