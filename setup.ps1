@@ -2,24 +2,30 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Downloads and installs VirtualBox, Extension Pack, and Whonix OVAs.
+    Downloads and installs VirtualBox, Extension Pack, and Whonix OVA.
 .DESCRIPTION
-    Silently installs VirtualBox if not present, downloads Whonix Gateway and
-    Workstation OVA images, verifies SHA-512 checksums, and imports the VMs.
+    Silently installs VirtualBox if not present, downloads the Whonix OVA
+    (which bundles both Gateway and Workstation VMs), verifies the SHA-512
+    checksum, and imports the VMs into VirtualBox.
 .PARAMETER WhonixVersion
-    Whonix release version to download. Defaults to 17.
+    Whonix release version to download. Defaults to 18.1.4.2.
+.PARAMETER WhonixEdition
+    Desktop edition: LXQt (GUI) or CLI. Defaults to LXQt.
 .PARAMETER DownloadDir
     Directory for downloaded files. Defaults to ./downloads under project root.
 .PARAMETER SkipVBoxInstall
     Skip VirtualBox installation (assumes already installed).
 .EXAMPLE
     .\setup.ps1
-    .\setup.ps1 -WhonixVersion 17 -SkipVBoxInstall
+    .\setup.ps1 -WhonixVersion "18.1.4.2" -WhonixEdition "CLI"
+    .\setup.ps1 -SkipVBoxInstall
 #>
 
 [CmdletBinding()]
 param(
-    [string]$WhonixVersion = "17.2.3.1",
+    [string]$WhonixVersion = "18.1.4.2",
+    [ValidateSet("LXQt", "CLI")]
+    [string]$WhonixEdition = "LXQt",
     [string]$DownloadDir = "",
     [switch]$SkipVBoxInstall
 )
@@ -27,7 +33,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-. (Join-Path $PSScriptRoot "lib" "logging.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
 
 if ([string]::IsNullOrEmpty($DownloadDir)) {
     $DownloadDir = Join-Path $PSScriptRoot "downloads"
@@ -37,12 +43,10 @@ if (-not (Test-Path $DownloadDir)) {
 }
 
 # --- Configuration ---
-$VBoxBaseUrl      = "https://download.virtualbox.org/virtualbox"
-$WhonixBaseUrl    = "https://download.whonix.org/ova/$WhonixVersion"
-$GatewayOva       = "Whonix-Gateway-Xfce-$WhonixVersion.ova"
-$WorkstationOva   = "Whonix-Workstation-Xfce-$WhonixVersion.ova"
-$GatewaySha512    = "$GatewayOva.sha512sums"
-$WorkstationSha512 = "$WorkstationOva.sha512sums"
+$VBoxBaseUrl   = "https://download.virtualbox.org/virtualbox"
+$WhonixBaseUrl = "https://download.whonix.org/ova/$WhonixVersion"
+$OvaFileName   = "Whonix-$WhonixEdition-$WhonixVersion.Intel_AMD64.ova"
+$Sha512Name    = "$OvaFileName.sha512sums"
 
 Write-Banner "WhonixAutoSetup - Installation"
 
@@ -106,7 +110,6 @@ function Test-Sha512Checksum {
     }
 
     $expectedHash = ($lines[0].Trim() -split "\s+")[0]
-
     $actualHash = (Get-FileHash -Path $FilePath -Algorithm SHA512).Hash
 
     if ($actualHash -ieq $expectedHash) {
@@ -141,9 +144,7 @@ function Find-VBoxManage {
     }
 
     foreach ($p in $searchPaths) {
-        if (Test-Path $p) {
-            return $p
-        }
+        if (Test-Path $p) { return $p }
     }
 
     $inPath = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
@@ -172,13 +173,11 @@ function Install-VirtualBox {
 
     Write-Log "VirtualBox not found. Downloading latest version..."
 
-    # Get latest version number
     $latestVersionUrl = "$VBoxBaseUrl/LATEST.TXT"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $latestVersion = (Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing).Content.Trim()
     Write-Log "Latest VirtualBox version: $latestVersion"
 
-    # Find the Windows installer filename from the download page
     $dirUrl = "$VBoxBaseUrl/$latestVersion/"
     $dirPage = (Invoke-WebRequest -Uri $dirUrl -UseBasicParsing).Content
     $installerMatch = [regex]::Match($dirPage, 'VirtualBox-[^"]+Win\.exe')
@@ -191,13 +190,8 @@ function Install-VirtualBox {
 
     Get-FileFromUrl -Url $installerUrl -Destination $installerPath
 
-    # Silent install
     Write-Log "Installing VirtualBox silently (this may take a few minutes)..."
-    $installArgs = @(
-        "--silent"
-        "--ignore-reboot"
-    )
-    $process = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+    $process = Start-Process -FilePath $installerPath -ArgumentList @("--silent", "--ignore-reboot") -Wait -PassThru
     if ($process.ExitCode -ne 0) {
         throw "VirtualBox installer exited with code $($process.ExitCode)"
     }
@@ -216,8 +210,8 @@ function Install-VirtualBox {
         $vboxManage = Find-VBoxManage
         if ($vboxManage) {
             Write-Log "Installing Extension Pack..."
-            $extArgs = @("extpack", "install", "--replace", "--accept-license=56be48f923303c8cabbd2e31a14ae6b34f8e5264e630d78e6e1ef4630bd573e0", $extPackPath)
-            & $vboxManage $extArgs 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
+            & $vboxManage extpack install --replace --accept-license=56be48f923303c8cabbd2e31a14ae6b34f8e5264e630d78e6e1ef4630bd573e0 $extPackPath 2>&1 |
+                ForEach-Object { Write-Log "  $_" -Level DEBUG }
             Write-Log "Extension Pack installed." -Level SUCCESS
         }
     }
@@ -233,82 +227,61 @@ function Install-VirtualBox {
 }
 
 # ============================================================
-# Step 2: Download Whonix OVAs
+# Step 2: Download Whonix OVA
 # ============================================================
-function Get-WhonixImages {
-    Write-Banner "Step 2: Download Whonix Images"
+function Get-WhonixImage {
+    Write-Banner "Step 2: Download Whonix $WhonixEdition $WhonixVersion"
 
-    $downloads = @(
-        @{ Name = $GatewayOva;       Url = "$WhonixBaseUrl/$GatewayOva" },
-        @{ Name = $GatewaySha512;    Url = "$WhonixBaseUrl/$GatewaySha512" },
-        @{ Name = $WorkstationOva;   Url = "$WhonixBaseUrl/$WorkstationOva" },
-        @{ Name = $WorkstationSha512; Url = "$WhonixBaseUrl/$WorkstationSha512" }
-    )
+    $ovaPath = Join-Path $DownloadDir $OvaFileName
+    $shaPath = Join-Path $DownloadDir $Sha512Name
 
-    foreach ($dl in $downloads) {
-        $dest = Join-Path $DownloadDir $dl.Name
-        Get-FileFromUrl -Url $dl.Url -Destination $dest
+    Get-FileFromUrl -Url "$WhonixBaseUrl/$Sha512Name" -Destination $shaPath
+    Get-FileFromUrl -Url "$WhonixBaseUrl/$OvaFileName" -Destination $ovaPath
+
+    # Verify checksum
+    Write-Banner "Step 3: Verify Checksum"
+    $valid = Test-Sha512Checksum -FilePath $ovaPath -ChecksumFile $shaPath
+    if (-not $valid) {
+        throw "Checksum verification failed. The downloaded file may be corrupted or tampered with. Delete it and retry."
     }
 
-    # Verify checksums
-    Write-Banner "Step 3: Verify Checksums"
-
-    $gwOvaPath = Join-Path $DownloadDir $GatewayOva
-    $gwShaPath = Join-Path $DownloadDir $GatewaySha512
-    $wsOvaPath = Join-Path $DownloadDir $WorkstationOva
-    $wsShaPath = Join-Path $DownloadDir $WorkstationSha512
-
-    $gwValid = Test-Sha512Checksum -FilePath $gwOvaPath -ChecksumFile $gwShaPath
-    $wsValid = Test-Sha512Checksum -FilePath $wsOvaPath -ChecksumFile $wsShaPath
-
-    if (-not $gwValid -or -not $wsValid) {
-        throw "Checksum verification failed. Downloaded files may be corrupted or tampered with. Delete them and retry."
-    }
-
-    Write-Log "All checksums verified successfully." -Level SUCCESS
-    return @{
-        GatewayOva    = $gwOvaPath
-        WorkstationOva = $wsOvaPath
-    }
+    return $ovaPath
 }
 
 # ============================================================
-# Step 4: Import OVAs
+# Step 4: Import OVA (creates both Gateway + Workstation VMs)
 # ============================================================
 function Import-WhonixVMs {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$VBoxManage,
-        [Parameter(Mandatory)] [string]$GatewayOvaPath,
-        [Parameter(Mandatory)] [string]$WorkstationOvaPath
+        [Parameter(Mandatory)] [string]$OvaPath
     )
 
     Write-Banner "Step 4: Import VMs into VirtualBox"
 
-    # Check if VMs already exist
-    $existingVMs = & $VBoxManage list vms 2>&1
-    $gwExists = $existingVMs | Select-String -SimpleMatch "Whonix-Gateway"
-    $wsExists = $existingVMs | Select-String -SimpleMatch "Whonix-Workstation"
+    $existingVMs = & $VBoxManage list vms 2>&1 | Out-String
 
-    if ($gwExists) {
-        Write-Log "Whonix-Gateway VM already exists, skipping import." -Level WARN
-    }
-    else {
-        Write-Log "Importing Whonix Gateway OVA (this may take several minutes)..."
-        & $VBoxManage import $GatewayOvaPath --vsys 0 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
-        if ($LASTEXITCODE -ne 0) { throw "Failed to import Whonix Gateway OVA." }
-        Write-Log "Whonix Gateway imported successfully." -Level SUCCESS
+    $gwPattern = "Whonix-Gateway"
+    $wsPattern = "Whonix-Workstation"
+
+    if ($existingVMs -match $gwPattern -and $existingVMs -match $wsPattern) {
+        Write-Log "Whonix Gateway and Workstation VMs already exist, skipping import." -Level WARN
+        return
     }
 
-    if ($wsExists) {
-        Write-Log "Whonix-Workstation VM already exists, skipping import." -Level WARN
+    Write-Log "Importing Whonix OVA (this creates both Gateway and Workstation VMs)..."
+    Write-Log "This may take several minutes for a ~2GB file..."
+    & $VBoxManage import $OvaPath 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to import Whonix OVA."
     }
-    else {
-        Write-Log "Importing Whonix Workstation OVA (this may take several minutes)..."
-        & $VBoxManage import $WorkstationOvaPath --vsys 0 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
-        if ($LASTEXITCODE -ne 0) { throw "Failed to import Whonix Workstation OVA." }
-        Write-Log "Whonix Workstation imported successfully." -Level SUCCESS
-    }
+    Write-Log "Whonix Gateway and Workstation imported successfully." -Level SUCCESS
+
+    # List the imported VMs
+    Write-Log "Registered VMs:"
+    $vms = & $VBoxManage list vms 2>&1
+    $vms | Where-Object { $_ -match "Whonix" } | ForEach-Object { Write-Log "  $_" -Level INFO }
 }
 
 # ============================================================
@@ -326,11 +299,9 @@ try {
     $vboxManage = Install-VirtualBox
     Write-Log "Using VBoxManage: $vboxManage"
 
-    $images = Get-WhonixImages
+    $ovaPath = Get-WhonixImage
 
-    Import-WhonixVMs -VBoxManage $vboxManage `
-                     -GatewayOvaPath $images.GatewayOva `
-                     -WorkstationOvaPath $images.WorkstationOva
+    Import-WhonixVMs -VBoxManage $vboxManage -OvaPath $ovaPath
 
     Write-Banner "Installation Complete"
     Write-Log "VirtualBox and Whonix VMs are installed." -Level SUCCESS

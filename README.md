@@ -13,7 +13,7 @@ Fully automated deployment of [Whonix](https://www.whonix.org/) Gateway and Work
 
 1. **Validates** your system meets hardware requirements (RAM, CPU, disk, virtualization)
 2. **Downloads and installs** VirtualBox + Extension Pack silently
-3. **Downloads** Whonix Gateway and Workstation OVA images with SHA-512 verification
+3. **Downloads** the Whonix OVA (bundles both Gateway + Workstation) with SHA-512 verification
 4. **Imports** both VMs into VirtualBox
 5. **Configures** resource allocation dynamically based on your hardware
 6. **Hardens** VMs with security best practices (clipboard isolation, no USB, no shared folders)
@@ -78,11 +78,12 @@ Custom thresholds:
 
 ### setup.ps1
 
-Downloads and silently installs the latest VirtualBox if not already present. Fetches Whonix Gateway and Workstation OVA files from official mirrors over HTTPS and verifies SHA-512 checksums before importing.
+Downloads and silently installs the latest VirtualBox if not already present. Fetches the Whonix OVA (which bundles both Gateway and Workstation VMs) from official mirrors over HTTPS and verifies the SHA-512 checksum before importing.
 
 Options:
 ```powershell
-.\setup.ps1 -WhonixVersion "17.2.3.1"   # Specify Whonix version
+.\setup.ps1 -WhonixVersion "18.1.4.2"   # Specify Whonix version
+.\setup.ps1 -WhonixEdition "CLI"         # CLI instead of LXQt GUI
 .\setup.ps1 -SkipVBoxInstall             # Skip VirtualBox installation
 .\setup.ps1 -DownloadDir "D:\VMs"        # Custom download directory
 ```

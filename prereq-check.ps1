@@ -21,7 +21,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-. (Join-Path $PSScriptRoot "lib" "logging.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
 
 Write-Banner "WhonixAutoSetup - Prerequisite Check"
 Write-Log "Starting system prerequisite validation..."

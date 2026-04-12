@@ -14,15 +14,15 @@
 
 [CmdletBinding()]
 param(
-    [string]$GatewayVMName = "Whonix-Gateway-Xfce",
-    [string]$WorkstationVMName = "Whonix-Workstation-Xfce",
+    [string]$GatewayVMName = "",
+    [string]$WorkstationVMName = "",
     [string]$InternalNetworkName = "Whonix"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-. (Join-Path $PSScriptRoot "lib" "logging.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
 
 # ============================================================
 # Helper: Find VBoxManage.exe
@@ -321,14 +321,20 @@ try {
     }
     Write-Log "Using VBoxManage: $vboxManage"
 
-    # Verify VMs exist
+    # Auto-detect VM names if not specified
     $vmList = & $vboxManage list vms 2>&1 | Out-String
-    if ($vmList -notmatch [regex]::Escape($GatewayVMName)) {
-        throw "VM '$GatewayVMName' not found. Run setup.ps1 first to import Whonix OVAs."
+    if ([string]::IsNullOrEmpty($GatewayVMName)) {
+        $gwMatch = [regex]::Match($vmList, '"(Whonix-Gateway[^"]*)"')
+        if ($gwMatch.Success) { $GatewayVMName = $gwMatch.Groups[1].Value }
+        else { throw "No Whonix Gateway VM found. Run setup.ps1 first." }
     }
-    if ($vmList -notmatch [regex]::Escape($WorkstationVMName)) {
-        throw "VM '$WorkstationVMName' not found. Run setup.ps1 first to import Whonix OVAs."
+    if ([string]::IsNullOrEmpty($WorkstationVMName)) {
+        $wsMatch = [regex]::Match($vmList, '"(Whonix-Workstation[^"]*)"')
+        if ($wsMatch.Success) { $WorkstationVMName = $wsMatch.Groups[1].Value }
+        else { throw "No Whonix Workstation VM found. Run setup.ps1 first." }
     }
+    Write-Log "Detected Gateway VM:     $GatewayVMName"
+    Write-Log "Detected Workstation VM: $WorkstationVMName"
 
     $allocation = Get-ResourceAllocation
 

@@ -7,7 +7,7 @@
     All scripts dot-source this module for unified log output.
 #>
 
-$Script:LogDir = Join-Path $PSScriptRoot ".." "logs"
+$Script:LogDir = Join-Path (Join-Path $PSScriptRoot "..") "logs"
 if (-not (Test-Path $Script:LogDir)) {
     New-Item -ItemType Directory -Path $Script:LogDir -Force | Out-Null
 }
