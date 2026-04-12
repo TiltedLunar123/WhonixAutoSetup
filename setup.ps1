@@ -103,9 +103,9 @@ function Test-Sha512Checksum {
     }
 
     $checksumContent = Get-Content $ChecksumFile -Raw
-    $lines = $checksumContent -split "`n" | Where-Object { $_ -match $fileName }
+    $lines = @($checksumContent -split "`n" | Where-Object { $_ -match [regex]::Escape($fileName) })
 
-    if (-not $lines -or $lines.Count -eq 0) {
+    if ($lines.Count -eq 0) {
         throw "No checksum entry found for $fileName in checksum file."
     }
 
