@@ -258,7 +258,7 @@ try {
     Write-Banner "Whonix is Running"
     Write-Log "Gateway:     $GatewayVMName" -Level SUCCESS
     Write-Log "Workstation: $WorkstationVMName" -Level SUCCESS
-    Write-Log ""
+    Write-Host ""
     Write-Log "Both VMs are now running. The Workstation routes all traffic through the Gateway's Tor connection."
     Write-Log "Log file: $(Get-LogFilePath)"
 }
