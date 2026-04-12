@@ -272,7 +272,8 @@ function Import-WhonixVMs {
 
     Write-Log "Importing Whonix OVA (this creates both Gateway and Workstation VMs)..."
     Write-Log "This may take several minutes for a ~2GB file..."
-    & $VBoxManage import $OvaPath 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
+    Write-Log "Accepting Whonix EULA for both virtual systems..."
+    & $VBoxManage import $OvaPath --vsys 0 --eula accept --vsys 1 --eula accept 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to import Whonix OVA."
     }
