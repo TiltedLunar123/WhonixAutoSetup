@@ -117,8 +117,9 @@ Launches Gateway first, polls for Tor bootstrap confirmation via guest control a
 
 Options:
 ```powershell
-.\start-whonix.ps1 -HeadlessGateway         # Run Gateway without a window
-.\start-whonix.ps1 -TorTimeoutSeconds 180    # Extend Tor wait time
+.\start-whonix.ps1 -HeadlessGateway              # Run Gateway without a window
+.\start-whonix.ps1 -TorTimeoutSeconds 180         # Extend Tor wait time
+.\start-whonix.ps1 -GuestPassword "mypassword"    # Custom guest VM password (default: changeme)
 ```
 
 ## Logging
