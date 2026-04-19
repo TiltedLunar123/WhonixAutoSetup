@@ -234,6 +234,9 @@ try {
 
     # Auto-detect VM names if not specified
     $vmList = & $vboxManage list vms 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to list VMs (exit code $LASTEXITCODE): $vmList"
+    }
     if ([string]::IsNullOrEmpty($GatewayVMName)) {
         $gwMatch = [regex]::Match($vmList, '"(Whonix-Gateway[^"]*)"')
         if ($gwMatch.Success) { $GatewayVMName = $gwMatch.Groups[1].Value }
