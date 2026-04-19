@@ -23,7 +23,8 @@ param(
     [string]$GatewayVMName = "",
     [string]$WorkstationVMName = "",
     [int]$TorTimeoutSeconds = 120,
-    [switch]$HeadlessGateway
+    [switch]$HeadlessGateway,
+    [string]$GuestPassword = "changeme"
 )
 
 Set-StrictMode -Version Latest
@@ -97,6 +98,10 @@ function Start-VM {
     if ($state -eq "saved" -or $state -eq "paused") {
         Write-Log "Resuming $VMName from $state state..."
         & $VBoxManage controlvm $VMName resume 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to resume $VMName from $state state (exit code $LASTEXITCODE)"
+        }
+        Write-Log "$VMName resumed." -Level SUCCESS
         return
     }
 
@@ -137,7 +142,7 @@ function Wait-ForTorBootstrap {
             $result = & $VBoxManage guestcontrol $GatewayVMName run `
                 --exe "/bin/bash" `
                 --username user `
-                --password changeme `
+                --password $GuestPassword `
                 -- -c "systemctl is-active tor@default.service" 2>&1 | Out-String
 
             if ($result -match "active") {
@@ -147,7 +152,7 @@ function Wait-ForTorBootstrap {
                 $bootstrap = & $VBoxManage guestcontrol $GatewayVMName run `
                     --exe "/bin/bash" `
                     --username user `
-                    --password changeme `
+                    --password $GuestPassword `
                     -- -c "timeout 5 tor-ctrl -c 'GETINFO status/bootstrap-phase' 2>/dev/null || echo 'check_unavailable'" 2>&1 | Out-String
 
                 if ($bootstrap -match "Bootstrapped 100%" -or $bootstrap -match "PROGRESS=100") {
@@ -162,7 +167,7 @@ function Wait-ForTorBootstrap {
                     $socksCheck = & $VBoxManage guestcontrol $GatewayVMName run `
                         --exe "/bin/bash" `
                         --username user `
-                        --password changeme `
+                        --password $GuestPassword `
                         -- -c "ss -tlnp | grep ':9050' || echo 'not_listening'" 2>&1 | Out-String
 
                     if ($socksCheck -notmatch "not_listening" -and $socksCheck -match "9050") {
@@ -184,12 +189,11 @@ function Wait-ForTorBootstrap {
         }
 
         # Method 2: Fallback - simple TCP check to Gateway's SOCKS proxy port
+        $tcpClient = $null
         try {
             $tcpClient = New-Object System.Net.Sockets.TcpClient
             $connectTask = $tcpClient.ConnectAsync($gatewayIP, 9050)
             $connected = $connectTask.Wait(3000)
-            $tcpClient.Close()
-            $tcpClient.Dispose()
 
             if ($connected) {
                 Write-Log "Gateway SOCKS port (9050) is reachable. Tor is ready." -Level SUCCESS
@@ -198,6 +202,12 @@ function Wait-ForTorBootstrap {
         }
         catch {
             # Connection refused or timeout -- Tor not ready yet
+        }
+        finally {
+            if ($tcpClient) {
+                $tcpClient.Close()
+                $tcpClient.Dispose()
+            }
         }
 
         $remaining = $TimeoutSeconds - $elapsed
@@ -224,6 +234,9 @@ try {
 
     # Auto-detect VM names if not specified
     $vmList = & $vboxManage list vms 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to list VMs (exit code $LASTEXITCODE): $vmList"
+    }
     if ([string]::IsNullOrEmpty($GatewayVMName)) {
         $gwMatch = [regex]::Match($vmList, '"(Whonix-Gateway[^"]*)"')
         if ($gwMatch.Success) { $GatewayVMName = $gwMatch.Groups[1].Value }

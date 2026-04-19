@@ -261,6 +261,9 @@ function Import-WhonixVMs {
     Write-Banner "Step 4: Import VMs into VirtualBox"
 
     $existingVMs = & $VBoxManage list vms 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to list VMs (exit code $LASTEXITCODE): $existingVMs"
+    }
 
     $gwPattern = "Whonix-Gateway"
     $wsPattern = "Whonix-Workstation"
@@ -275,6 +278,10 @@ function Import-WhonixVMs {
     Write-Log "Accepting Whonix EULA for both virtual systems..."
     & $VBoxManage import $OvaPath --vsys 0 --eula accept --vsys 1 --eula accept 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
     if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $OvaPath) {
+            Write-Log "Removing OVA to prevent stale file on retry..." -Level WARN
+            Remove-Item $OvaPath -Force
+        }
         throw "Failed to import Whonix OVA."
     }
     Write-Log "Whonix Gateway and Workstation imported successfully." -Level SUCCESS
