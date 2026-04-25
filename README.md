@@ -82,11 +82,21 @@ Downloads and silently installs the latest VirtualBox if not already present. Fe
 
 Options:
 ```powershell
-.\setup.ps1 -WhonixVersion "18.1.4.2"   # Specify Whonix version
-.\setup.ps1 -WhonixEdition "CLI"         # CLI instead of LXQt GUI
-.\setup.ps1 -SkipVBoxInstall             # Skip VirtualBox installation
-.\setup.ps1 -DownloadDir "D:\VMs"        # Custom download directory
+.\setup.ps1 -WhonixVersion "18.1.4.2"           # Specify Whonix version
+.\setup.ps1 -WhonixEdition "CLI"                 # CLI instead of LXQt GUI
+.\setup.ps1 -SkipVBoxInstall                     # Skip VirtualBox installation
+.\setup.ps1 -DownloadDir "D:\VMs"                # Custom download directory
+.\setup.ps1 -VirtualBoxVersion "7.1.4"           # Pin a VirtualBox release
+.\setup.ps1 -VirtualBoxVersion "7.1.4" `
+            -VirtualBoxHash "<sha256>"           # Reproducible + verified install
 ```
+
+> Without `-VirtualBoxVersion` the script fetches whatever `LATEST.TXT`
+> currently advertises, so two runs on different days may install
+> different VirtualBox builds. Pair `-VirtualBoxVersion` with
+> `-VirtualBoxHash` (SHA-256) for a reproducible, integrity-checked
+> install; mismatch aborts setup. Without `-VirtualBoxHash` the
+> installer is executed unverified.
 
 ### configure-vms.ps1
 

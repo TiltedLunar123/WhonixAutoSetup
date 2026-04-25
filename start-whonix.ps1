@@ -114,6 +114,28 @@ function Start-VM {
 }
 
 # ============================================================
+# Helper: One-shot probe for Guest Additions / guestcontrol support
+# ============================================================
+function Test-GuestAdditionsAvailable {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$VBoxManage,
+        [Parameter(Mandatory)] [string]$VMName,
+        [Parameter(Mandatory)] [string]$GuestPassword
+    )
+
+    try {
+        & $VBoxManage guestcontrol $VMName stat / `
+            --username user `
+            --password $GuestPassword 2>&1 | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+# ============================================================
 # Health check: Wait for Gateway Tor bootstrap
 # ============================================================
 function Wait-ForTorBootstrap {
@@ -135,9 +157,23 @@ function Wait-ForTorBootstrap {
     Start-Sleep -Seconds 15
     $elapsed = 15
 
+    # Probe Guest Additions exactly once. If absent, every guestcontrol call
+    # below would fail noisily and the TCP fallback could read a transient
+    # "connection refused" as a real failure (false negative). When GA is
+    # unavailable, skip Method 1 entirely and rely on the network probe.
+    $useGuestControl = Test-GuestAdditionsAvailable `
+        -VBoxManage $VBoxManage -VMName $GatewayVMName -GuestPassword $GuestPassword
+    if ($useGuestControl) {
+        Write-Log "Guest Additions detected -- using guestcontrol + TCP probes." -Level DEBUG
+    }
+    else {
+        Write-Log "Guest Additions not available; using TCP probe only." -Level WARN
+    }
+
     while ($elapsed -lt $TimeoutSeconds) {
         # Method 1: Try to run a command inside the Gateway via VBoxManage guestcontrol
         # This checks if Tor's control port or SOCKS port is responding
+        if ($useGuestControl) {
         try {
             $result = & $VBoxManage guestcontrol $GatewayVMName run `
                 --exe "/bin/bash" `
@@ -184,8 +220,11 @@ function Wait-ForTorBootstrap {
             }
         }
         catch {
-            # Guest additions may not support guestcontrol; fall back to network check
-            Write-Log "  Guest control not available, using network probe..." -Level DEBUG
+            # Probe said GA was present, but a single call failed mid-flight.
+            # Disable Method 1 going forward so we don't spam the same failure.
+            Write-Log "  guestcontrol call failed; falling back to TCP probe for the rest of the wait." -Level WARN
+            $useGuestControl = $false
+        }
         }
 
         # Method 2: Fallback - simple TCP check to Gateway's SOCKS proxy port

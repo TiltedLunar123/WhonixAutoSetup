@@ -15,10 +15,18 @@
     Directory for downloaded files. Defaults to ./downloads under project root.
 .PARAMETER SkipVBoxInstall
     Skip VirtualBox installation (assumes already installed).
+.PARAMETER VirtualBoxVersion
+    Pin a specific VirtualBox version (e.g. "7.1.4") for reproducible installs.
+    When empty (default), the script fetches whatever LATEST.TXT advertises.
+.PARAMETER VirtualBoxHash
+    SHA-256 hash of the expected VirtualBox installer. When supplied, the
+    downloaded installer is verified before execution; mismatch aborts setup.
+    Pair this with -VirtualBoxVersion for a fully reproducible install.
 .EXAMPLE
     .\setup.ps1
     .\setup.ps1 -WhonixVersion "18.1.4.2" -WhonixEdition "CLI"
     .\setup.ps1 -SkipVBoxInstall
+    .\setup.ps1 -VirtualBoxVersion "7.1.4" -VirtualBoxHash "abc123..."
 #>
 
 [CmdletBinding()]
@@ -27,7 +35,9 @@ param(
     [ValidateSet("LXQt", "CLI")]
     [string]$WhonixEdition = "LXQt",
     [string]$DownloadDir = "",
-    [switch]$SkipVBoxInstall
+    [switch]$SkipVBoxInstall,
+    [string]$VirtualBoxVersion = "",
+    [string]$VirtualBoxHash = ""
 )
 
 Set-StrictMode -Version Latest
@@ -125,6 +135,34 @@ function Test-Sha512Checksum {
 }
 
 # ============================================================
+# Helper: Verify file against an expected SHA-256 hash
+# ============================================================
+function Test-Sha256Hash {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$FilePath,
+        [Parameter(Mandatory)] [string]$ExpectedHash
+    )
+
+    $fileName = Split-Path $FilePath -Leaf
+    Write-Log "Verifying SHA-256 hash for $fileName..."
+
+    $actualHash = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
+    $expected = $ExpectedHash.Trim()
+
+    if ($actualHash -ieq $expected) {
+        Write-Log "Hash VERIFIED for $fileName" -Level SUCCESS
+        return $true
+    }
+    else {
+        Write-Log "Hash MISMATCH for $fileName" -Level ERROR
+        Write-Log "  Expected: $expected" -Level ERROR
+        Write-Log "  Actual:   $actualHash" -Level ERROR
+        return $false
+    }
+}
+
+# ============================================================
 # Helper: Find VBoxManage.exe
 # ============================================================
 function Find-VBoxManage {
@@ -171,24 +209,41 @@ function Install-VirtualBox {
         throw "VirtualBox not found and -SkipVBoxInstall was specified."
     }
 
-    Write-Log "VirtualBox not found. Downloading latest version..."
-
-    $latestVersionUrl = "$VBoxBaseUrl/LATEST.TXT"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $latestVersion = (Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing).Content.Trim()
-    Write-Log "Latest VirtualBox version: $latestVersion"
 
-    $dirUrl = "$VBoxBaseUrl/$latestVersion/"
+    if ([string]::IsNullOrWhiteSpace($VirtualBoxVersion)) {
+        Write-Log "VirtualBox not found. Resolving latest version..."
+        $latestVersionUrl = "$VBoxBaseUrl/LATEST.TXT"
+        $resolvedVersion = (Invoke-WebRequest -Uri $latestVersionUrl -UseBasicParsing).Content.Trim()
+        Write-Log "Latest VirtualBox version: $resolvedVersion"
+    }
+    else {
+        $resolvedVersion = $VirtualBoxVersion.Trim()
+        Write-Log "VirtualBox not found. Using pinned version: $resolvedVersion"
+    }
+
+    $dirUrl = "$VBoxBaseUrl/$resolvedVersion/"
     $dirPage = (Invoke-WebRequest -Uri $dirUrl -UseBasicParsing).Content
     $installerMatch = [regex]::Match($dirPage, 'VirtualBox-[^"]+Win\.exe')
     if (-not $installerMatch.Success) {
         throw "Could not find Windows installer at $dirUrl"
     }
     $installerName = $installerMatch.Value
-    $installerUrl = "$VBoxBaseUrl/$latestVersion/$installerName"
+    $installerUrl = "$VBoxBaseUrl/$resolvedVersion/$installerName"
     $installerPath = Join-Path $DownloadDir $installerName
 
     Get-FileFromUrl -Url $installerUrl -Destination $installerPath
+
+    if (-not [string]::IsNullOrWhiteSpace($VirtualBoxHash)) {
+        if (-not (Test-Sha256Hash -FilePath $installerPath -ExpectedHash $VirtualBoxHash)) {
+            Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+            throw "VirtualBox installer hash verification failed -- aborting setup."
+        }
+    }
+    else {
+        Write-Log "No -VirtualBoxHash supplied; installer integrity NOT verified." -Level WARN
+        Write-Log "  Pin a hash with -VirtualBoxHash <sha256> for reproducible, signed installs." -Level WARN
+    }
 
     Write-Log "Installing VirtualBox silently (this may take a few minutes)..."
     $process = Start-Process -FilePath $installerPath -ArgumentList @("--silent", "--ignore-reboot") -Wait -PassThru
@@ -201,7 +256,7 @@ function Install-VirtualBox {
     $extPackMatch = [regex]::Match($dirPage, 'Oracle_VirtualBox_Extension_Pack-[^"]+\.vbox-extpack')
     if ($extPackMatch.Success) {
         $extPackName = $extPackMatch.Value
-        $extPackUrl = "$VBoxBaseUrl/$latestVersion/$extPackName"
+        $extPackUrl = "$VBoxBaseUrl/$resolvedVersion/$extPackName"
         $extPackPath = Join-Path $DownloadDir $extPackName
 
         Write-Log "Downloading VirtualBox Extension Pack..."
