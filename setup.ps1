@@ -135,6 +135,34 @@ function Test-Sha512Checksum {
 }
 
 # ============================================================
+# Helper: Verify file against an expected SHA-256 hash
+# ============================================================
+function Test-Sha256Hash {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$FilePath,
+        [Parameter(Mandatory)] [string]$ExpectedHash
+    )
+
+    $fileName = Split-Path $FilePath -Leaf
+    Write-Log "Verifying SHA-256 hash for $fileName..."
+
+    $actualHash = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
+    $expected = $ExpectedHash.Trim()
+
+    if ($actualHash -ieq $expected) {
+        Write-Log "Hash VERIFIED for $fileName" -Level SUCCESS
+        return $true
+    }
+    else {
+        Write-Log "Hash MISMATCH for $fileName" -Level ERROR
+        Write-Log "  Expected: $expected" -Level ERROR
+        Write-Log "  Actual:   $actualHash" -Level ERROR
+        return $false
+    }
+}
+
+# ============================================================
 # Helper: Find VBoxManage.exe
 # ============================================================
 function Find-VBoxManage {
@@ -205,6 +233,17 @@ function Install-VirtualBox {
     $installerPath = Join-Path $DownloadDir $installerName
 
     Get-FileFromUrl -Url $installerUrl -Destination $installerPath
+
+    if (-not [string]::IsNullOrWhiteSpace($VirtualBoxHash)) {
+        if (-not (Test-Sha256Hash -FilePath $installerPath -ExpectedHash $VirtualBoxHash)) {
+            Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+            throw "VirtualBox installer hash verification failed -- aborting setup."
+        }
+    }
+    else {
+        Write-Log "No -VirtualBoxHash supplied; installer integrity NOT verified." -Level WARN
+        Write-Log "  Pin a hash with -VirtualBoxHash <sha256> for reproducible, signed installs." -Level WARN
+    }
 
     Write-Log "Installing VirtualBox silently (this may take a few minutes)..."
     $process = Start-Process -FilePath $installerPath -ArgumentList @("--silent", "--ignore-reboot") -Wait -PassThru
