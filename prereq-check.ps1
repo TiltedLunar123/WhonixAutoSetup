@@ -22,6 +22,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "prereq.ps1")
 
 Write-Banner "WhonixAutoSetup - Prerequisite Check"
 Write-Log "Starting system prerequisite validation..."
@@ -33,7 +34,7 @@ $allPassed = $true
 try {
     $totalRamBytes = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
     $totalRamGB = [math]::Round($totalRamBytes / 1GB, 1)
-    $ramPassed = $totalRamGB -ge $MinRamGB
+    $ramPassed = Test-ResourceThreshold -ActualBytes $totalRamBytes -MinimumGB $MinRamGB
     if (-not $ramPassed) { $allPassed = $false }
 
     $results += [PSCustomObject]@{
@@ -88,7 +89,7 @@ try {
     if (-not $systemDrive) { $systemDrive = "C:" }
     $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$systemDrive'"
     $freeSpaceGB = [math]::Round($disk.FreeSpace / 1GB, 1)
-    $diskPassed = $freeSpaceGB -ge $MinDiskGB
+    $diskPassed = Test-ResourceThreshold -ActualBytes $disk.FreeSpace -MinimumGB $MinDiskGB
     if (-not $diskPassed) { $allPassed = $false }
 
     $results += [PSCustomObject]@{

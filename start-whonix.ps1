@@ -31,35 +31,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
-
-# ============================================================
-# Helper: Find VBoxManage.exe
-# ============================================================
-function Find-VBoxManage {
-    $searchPaths = @(
-        (Join-Path $env:ProgramFiles "Oracle\VirtualBox\VBoxManage.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Oracle\VirtualBox\VBoxManage.exe")
-    )
-
-    $envPath = $env:VBOX_MSI_INSTALL_PATH
-    if ($envPath) {
-        $searchPaths = @(Join-Path $envPath "VBoxManage.exe") + $searchPaths
-    }
-
-    $envPath2 = $env:VBOX_INSTALL_PATH
-    if ($envPath2) {
-        $searchPaths = @(Join-Path $envPath2 "VBoxManage.exe") + $searchPaths
-    }
-
-    foreach ($p in $searchPaths) {
-        if (Test-Path $p) { return $p }
-    }
-
-    $inPath = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
-    if ($inPath) { return $inPath.Source }
-
-    return $null
-}
+. (Join-Path (Join-Path $PSScriptRoot "lib") "vbox.ps1")
 
 # ============================================================
 # Helper: Get VM state
@@ -81,7 +53,7 @@ function Get-VMState {
 # ============================================================
 # Helper: Start a VM
 # ============================================================
-function Start-VM {
+function Start-WhonixVm {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$VBoxManage,
@@ -240,7 +212,10 @@ function Wait-ForTorBootstrap {
             }
         }
         catch {
-            # Connection refused or timeout -- Tor not ready yet
+            # Connection refused or timeout means Tor isn't listening yet.
+            # The loop will retry; we only need to drop the exception so
+            # the wait/sleep logic below runs.
+            $null = $_
         }
         finally {
             if ($tcpClient) {
@@ -292,7 +267,7 @@ try {
     # Step 1: Start Gateway
     Write-Banner "Starting Whonix Gateway"
     $gwType = if ($HeadlessGateway) { "headless" } else { "gui" }
-    Start-VM -VBoxManage $vboxManage -VMName $GatewayVMName -Type $gwType
+    Start-WhonixVm -VBoxManage $vboxManage -VMName $GatewayVMName -Type $gwType
 
     # Step 2: Wait for Tor
     $torReady = Wait-ForTorBootstrap -VBoxManage $vboxManage -TimeoutSeconds $TorTimeoutSeconds
@@ -305,7 +280,7 @@ try {
 
     # Step 3: Start Workstation
     Write-Banner "Starting Whonix Workstation"
-    Start-VM -VBoxManage $vboxManage -VMName $WorkstationVMName -Type "gui"
+    Start-WhonixVm -VBoxManage $vboxManage -VMName $WorkstationVMName -Type "gui"
 
     Write-Banner "Whonix is Running"
     Write-Log "Gateway:     $GatewayVMName" -Level SUCCESS
