@@ -150,7 +150,7 @@ function Set-GatewayConfiguration {
     ) -Description "Setting network adapters (NAT + Internal '$InternalNetworkName')"
 
     # Security hardening
-    Apply-SecurityHardening -VBoxManage $VBoxManage -VMName $vmName
+    Set-SecurityHardening -VBoxManage $VBoxManage -VMName $vmName
 
     Write-Log "Gateway configuration complete." -Level SUCCESS
 }
@@ -194,7 +194,7 @@ function Set-WorkstationConfiguration {
     ) -Description "Setting network adapter (Internal '$InternalNetworkName' only)"
 
     # Security hardening
-    Apply-SecurityHardening -VBoxManage $VBoxManage -VMName $vmName
+    Set-SecurityHardening -VBoxManage $VBoxManage -VMName $vmName
 
     Write-Log "Workstation configuration complete." -Level SUCCESS
 }
@@ -202,7 +202,7 @@ function Set-WorkstationConfiguration {
 # ============================================================
 # Security hardening (applied to both VMs)
 # ============================================================
-function Apply-SecurityHardening {
+function Set-SecurityHardening {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$VBoxManage,

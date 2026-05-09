@@ -53,7 +53,7 @@ function Get-VMState {
 # ============================================================
 # Helper: Start a VM
 # ============================================================
-function Start-VM {
+function Start-WhonixVm {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$VBoxManage,
@@ -212,7 +212,10 @@ function Wait-ForTorBootstrap {
             }
         }
         catch {
-            # Connection refused or timeout -- Tor not ready yet
+            # Connection refused or timeout means Tor isn't listening yet.
+            # The loop will retry; we only need to drop the exception so
+            # the wait/sleep logic below runs.
+            $null = $_
         }
         finally {
             if ($tcpClient) {
@@ -264,7 +267,7 @@ try {
     # Step 1: Start Gateway
     Write-Banner "Starting Whonix Gateway"
     $gwType = if ($HeadlessGateway) { "headless" } else { "gui" }
-    Start-VM -VBoxManage $vboxManage -VMName $GatewayVMName -Type $gwType
+    Start-WhonixVm -VBoxManage $vboxManage -VMName $GatewayVMName -Type $gwType
 
     # Step 2: Wait for Tor
     $torReady = Wait-ForTorBootstrap -VBoxManage $vboxManage -TimeoutSeconds $TorTimeoutSeconds
@@ -277,7 +280,7 @@ try {
 
     # Step 3: Start Workstation
     Write-Banner "Starting Whonix Workstation"
-    Start-VM -VBoxManage $vboxManage -VMName $WorkstationVMName -Type "gui"
+    Start-WhonixVm -VBoxManage $vboxManage -VMName $WorkstationVMName -Type "gui"
 
     Write-Banner "Whonix is Running"
     Write-Log "Gateway:     $GatewayVMName" -Level SUCCESS
