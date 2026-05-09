@@ -1,5 +1,6 @@
 # WhonixAutoSetup
 
+[![CI](https://github.com/TiltedLunar123/WhonixAutoSetup/actions/workflows/ci.yml/badge.svg)](https://github.com/TiltedLunar123/WhonixAutoSetup/actions/workflows/ci.yml)
 [![PowerShell 5.1+](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://docs.microsoft.com/en-us/powershell/)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
