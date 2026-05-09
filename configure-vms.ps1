@@ -23,35 +23,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
-
-# ============================================================
-# Helper: Find VBoxManage.exe
-# ============================================================
-function Find-VBoxManage {
-    $searchPaths = @(
-        (Join-Path $env:ProgramFiles "Oracle\VirtualBox\VBoxManage.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Oracle\VirtualBox\VBoxManage.exe")
-    )
-
-    $envPath = $env:VBOX_MSI_INSTALL_PATH
-    if ($envPath) {
-        $searchPaths = @(Join-Path $envPath "VBoxManage.exe") + $searchPaths
-    }
-
-    $envPath2 = $env:VBOX_INSTALL_PATH
-    if ($envPath2) {
-        $searchPaths = @(Join-Path $envPath2 "VBoxManage.exe") + $searchPaths
-    }
-
-    foreach ($p in $searchPaths) {
-        if (Test-Path $p) { return $p }
-    }
-
-    $inPath = Get-Command VBoxManage.exe -ErrorAction SilentlyContinue
-    if ($inPath) { return $inPath.Source }
-
-    return $null
-}
+. (Join-Path (Join-Path $PSScriptRoot "lib") "vbox.ps1")
 
 # ============================================================
 # Helper: Run VBoxManage command with logging
