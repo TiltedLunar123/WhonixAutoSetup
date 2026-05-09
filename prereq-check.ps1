@@ -22,6 +22,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "prereq.ps1")
 
 Write-Banner "WhonixAutoSetup - Prerequisite Check"
 Write-Log "Starting system prerequisite validation..."
@@ -33,11 +34,7 @@ $allPassed = $true
 try {
     $totalRamBytes = (Get-CimInstance -ClassName Win32_ComputerSystem).TotalPhysicalMemory
     $totalRamGB = [math]::Round($totalRamBytes / 1GB, 1)
-    # Win32_ComputerSystem.TotalPhysicalMemory excludes BIOS-reserved memory
-    # (video aperture, ACPI tables, etc.), so an "8 GB" stick typically reports
-    # ~7.7-7.9 GB. A strict `-ge MinRamGB` rejects systems that meet the spec.
-    # Allow a 256 MB slack so the threshold reflects what users see on the box.
-    $ramPassed = ($totalRamBytes / 1MB) -ge ($MinRamGB * 1024 - 256)
+    $ramPassed = Test-ResourceThreshold -ActualBytes $totalRamBytes -MinimumGB $MinRamGB
     if (-not $ramPassed) { $allPassed = $false }
 
     $results += [PSCustomObject]@{
@@ -92,9 +89,7 @@ try {
     if (-not $systemDrive) { $systemDrive = "C:" }
     $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$systemDrive'"
     $freeSpaceGB = [math]::Round($disk.FreeSpace / 1GB, 1)
-    # Match the RAM check rounding behavior so a 50.0 GB threshold doesn't
-    # false-fail on a drive showing 49.9 GB free after the 1-decimal round.
-    $diskPassed = ($disk.FreeSpace / 1MB) -ge ($MinDiskGB * 1024 - 256)
+    $diskPassed = Test-ResourceThreshold -ActualBytes $disk.FreeSpace -MinimumGB $MinDiskGB
     if (-not $diskPassed) { $allPassed = $false }
 
     $results += [PSCustomObject]@{
