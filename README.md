@@ -49,18 +49,30 @@ Open PowerShell **as Administrator** and run:
 .\start-whonix.ps1
 ```
 
+Or run all four steps in sequence with a single entry point (it stops if any
+step fails):
+
+```powershell
+.\run.ps1
+```
+
 ## Project Structure
 
 ```
 WhonixAutoSetup/
-├── prereq-check.ps1      # System requirements validation
+├── run.ps1                # One-shot: runs all four steps in order
+├── prereq-check.ps1       # System requirements validation
 ├── setup.ps1              # VirtualBox + Whonix OVA installer
 ├── configure-vms.ps1      # VM resource allocation and hardening
 ├── start-whonix.ps1       # Ordered VM launch with Tor health check
 ├── lib/
-│   └── logging.ps1        # Shared logging utilities
-├── logs/                   # Runtime log files (gitignored)
-├── downloads/              # Downloaded OVAs and installers (gitignored)
+│   ├── logging.ps1        # Shared logging utilities
+│   ├── prereq.ps1         # Resource-threshold math helper
+│   └── vbox.ps1           # VBoxManage.exe locator
+├── tests/                 # Pester 5 unit tests for the lib helpers
+├── .github/workflows/     # CI: PSScriptAnalyzer + Pester
+├── logs/                  # Runtime log files (gitignored)
+├── downloads/             # Downloaded OVAs and installers (gitignored)
 ├── README.md
 ├── LICENSE
 └── .gitignore
@@ -146,6 +158,27 @@ All scripts log to `logs/WhonixAutoSetup_<timestamp>.log` with timestamped entri
 | Checksum mismatch | Delete the file from `downloads/` and re-run `setup.ps1` |
 | Tor bootstrap timeout | Increase `-TorTimeoutSeconds` or check Gateway console for errors |
 | VM already exists | The scripts skip import if a VM with that name exists; delete it in VirtualBox to reimport |
+
+## Development
+
+CI runs PSScriptAnalyzer and Pester on every push and pull request. You can run
+the same checks locally before opening a PR:
+
+```powershell
+# Install the tooling (once)
+Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+Install-Module Pester -MinimumVersion 5.0.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+# Lint (CI fails on Error-severity findings)
+Invoke-ScriptAnalyzer -Path . -Recurse `
+    -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions
+
+# Run the unit tests
+Invoke-Pester -Path tests
+```
+
+The tests in `tests/` cover the pure helpers in `lib/` and mock VirtualBox and
+the filesystem, so they run anywhere without a VM or VirtualBox installed.
 
 ## Disclaimer
 
