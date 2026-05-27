@@ -159,6 +159,27 @@ All scripts log to `logs/WhonixAutoSetup_<timestamp>.log` with timestamped entri
 | Tor bootstrap timeout | Increase `-TorTimeoutSeconds` or check Gateway console for errors |
 | VM already exists | The scripts skip import if a VM with that name exists; delete it in VirtualBox to reimport |
 
+## Development
+
+CI runs PSScriptAnalyzer and Pester on every push and pull request. You can run
+the same checks locally before opening a PR:
+
+```powershell
+# Install the tooling (once)
+Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+Install-Module Pester -MinimumVersion 5.0.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+# Lint (CI fails on Error-severity findings)
+Invoke-ScriptAnalyzer -Path . -Recurse `
+    -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions
+
+# Run the unit tests
+Invoke-Pester -Path tests
+```
+
+The tests in `tests/` cover the pure helpers in `lib/` and mock VirtualBox and
+the filesystem, so they run anywhere without a VM or VirtualBox installed.
+
 ## Disclaimer
 
 This project is provided for **educational and legitimate privacy research purposes only**. Users are solely responsible for ensuring their use of Whonix and Tor complies with all applicable laws and regulations in their jurisdiction. The authors do not condone or encourage any illegal activity.
