@@ -49,18 +49,30 @@ Open PowerShell **as Administrator** and run:
 .\start-whonix.ps1
 ```
 
+Or run all four steps in sequence with a single entry point (it stops if any
+step fails):
+
+```powershell
+.\run.ps1
+```
+
 ## Project Structure
 
 ```
 WhonixAutoSetup/
-├── prereq-check.ps1      # System requirements validation
+├── run.ps1                # One-shot: runs all four steps in order
+├── prereq-check.ps1       # System requirements validation
 ├── setup.ps1              # VirtualBox + Whonix OVA installer
 ├── configure-vms.ps1      # VM resource allocation and hardening
 ├── start-whonix.ps1       # Ordered VM launch with Tor health check
 ├── lib/
-│   └── logging.ps1        # Shared logging utilities
-├── logs/                   # Runtime log files (gitignored)
-├── downloads/              # Downloaded OVAs and installers (gitignored)
+│   ├── logging.ps1        # Shared logging utilities
+│   ├── prereq.ps1         # Resource-threshold math helper
+│   └── vbox.ps1           # VBoxManage.exe locator
+├── tests/                 # Pester 5 unit tests for the lib helpers
+├── .github/workflows/     # CI: PSScriptAnalyzer + Pester
+├── logs/                  # Runtime log files (gitignored)
+├── downloads/             # Downloaded OVAs and installers (gitignored)
 ├── README.md
 ├── LICENSE
 └── .gitignore
