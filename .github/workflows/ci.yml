@@ -16,8 +16,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install PSScriptAnalyzer and Pester
-        shell: powershell
+        shell: pwsh
         run: |
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default
+          }
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
             Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
@@ -30,7 +33,7 @@ jobs:
             Format-Table Name, Version
 
       - name: PSScriptAnalyzer (fail on Error)
-        shell: powershell
+        shell: pwsh
         run: |
           $results = Invoke-ScriptAnalyzer -Path . -Recurse `
             -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions
@@ -49,7 +52,7 @@ jobs:
           Write-Host "PSSA: 0 errors, $($warnings.Count) warnings"
 
       - name: Pester
-        shell: powershell
+        shell: pwsh
         run: |
           Import-Module Pester -MinimumVersion 5.0.0
           $config = New-PesterConfiguration
