@@ -24,6 +24,7 @@ $ErrorActionPreference = "Stop"
 
 . (Join-Path (Join-Path $PSScriptRoot "lib") "logging.ps1")
 . (Join-Path (Join-Path $PSScriptRoot "lib") "vbox.ps1")
+. (Join-Path (Join-Path $PSScriptRoot "lib") "allocation.ps1")
 
 # ============================================================
 # Helper: Run VBoxManage command with logging
@@ -62,51 +63,14 @@ function Get-ResourceAllocation {
     Write-Log "Total RAM: $totalRamGB GB ($totalRamMB MB)"
     Write-Log "Total CPU cores: $cpuCores"
 
-    # Gateway: fixed 1 core, 1024 MB
-    $gwCores = 1
-    $gwRamMB = 1024
-
-    # Workstation: scale based on available resources
-    # Reserve 4GB + gateway allocation for the host OS
-    $hostReserveMB = 4096
-    $availableRamMB = $totalRamMB - $hostReserveMB - $gwRamMB
-    $availableCores = $cpuCores - $gwCores - 1  # leave 1 core for host
-
-    if ($availableCores -lt 1) { $availableCores = 1 }
-
-    # Allocate 25-40% of remaining RAM depending on total
-    if ($totalRamGB -ge 32) {
-        $wsRamMB = [math]::Floor($availableRamMB * 0.40)
-        $wsCores = [math]::Min($availableCores, 4)
-    }
-    elseif ($totalRamGB -ge 16) {
-        $wsRamMB = [math]::Floor($availableRamMB * 0.33)
-        $wsCores = [math]::Min($availableCores, 3)
-    }
-    else {
-        $wsRamMB = [math]::Floor($availableRamMB * 0.25)
-        $wsCores = [math]::Min($availableCores, 2)
-    }
-
-    # Enforce minimums and round to nearest 128MB
-    if ($wsRamMB -lt 2048) { $wsRamMB = 2048 }
-    $wsRamMB = [math]::Floor($wsRamMB / 128) * 128
-
-    # Cap at reasonable maximums
-    if ($wsRamMB -gt 8192) { $wsRamMB = 8192 }
-    if ($wsCores -gt 4) { $wsCores = 4 }
-
-    $allocation = @{
-        GatewayCores     = $gwCores
-        GatewayRamMB     = $gwRamMB
-        WorkstationCores = $wsCores
-        WorkstationRamMB = $wsRamMB
-    }
+    # The sizing math lives in lib/allocation.ps1 so it can be tested without
+    # a real host or VirtualBox. See Get-VmResourceAllocation.
+    $allocation = Get-VmResourceAllocation -TotalRamBytes $totalRamBytes -CpuCores $cpuCores
 
     Write-Log "Resource allocation plan:" -Level INFO
-    Write-Log "  Gateway:     $gwCores core(s), $gwRamMB MB RAM" -Level INFO
-    Write-Log "  Workstation: $wsCores core(s), $wsRamMB MB RAM" -Level INFO
-    Write-Log "  Host reserve: ~$hostReserveMB MB RAM, 1 core" -Level INFO
+    Write-Log "  Gateway:     $($allocation.GatewayCores) core(s), $($allocation.GatewayRamMB) MB RAM" -Level INFO
+    Write-Log "  Workstation: $($allocation.WorkstationCores) core(s), $($allocation.WorkstationRamMB) MB RAM" -Level INFO
+    Write-Log "  Host reserve: ~4096 MB RAM, 1 core" -Level INFO
 
     return $allocation
 }
