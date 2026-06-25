@@ -252,14 +252,12 @@ try {
         throw "Failed to list VMs (exit code $LASTEXITCODE): $vmList"
     }
     if ([string]::IsNullOrEmpty($GatewayVMName)) {
-        $gwMatch = [regex]::Match($vmList, '"(Whonix-Gateway[^"]*)"')
-        if ($gwMatch.Success) { $GatewayVMName = $gwMatch.Groups[1].Value }
-        else { throw "No Whonix Gateway VM found. Run setup.ps1 first." }
+        $GatewayVMName = Resolve-WhonixVmName -VmListOutput $vmList -NamePrefix "Whonix-Gateway"
+        if (-not $GatewayVMName) { throw "No Whonix Gateway VM found. Run setup.ps1 first." }
     }
     if ([string]::IsNullOrEmpty($WorkstationVMName)) {
-        $wsMatch = [regex]::Match($vmList, '"(Whonix-Workstation[^"]*)"')
-        if ($wsMatch.Success) { $WorkstationVMName = $wsMatch.Groups[1].Value }
-        else { throw "No Whonix Workstation VM found. Run setup.ps1 first." }
+        $WorkstationVMName = Resolve-WhonixVmName -VmListOutput $vmList -NamePrefix "Whonix-Workstation"
+        if (-not $WorkstationVMName) { throw "No Whonix Workstation VM found. Run setup.ps1 first." }
     }
     Write-Log "Detected Gateway VM:     $GatewayVMName"
     Write-Log "Detected Workstation VM: $WorkstationVMName"

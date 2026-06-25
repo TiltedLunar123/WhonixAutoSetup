@@ -59,3 +59,67 @@ Describe "Find-VBoxManage" {
         Find-VBoxManage | Should -Be $shimPath
     }
 }
+
+Describe "Resolve-WhonixVmName" {
+    # A typical `VBoxManage list vms` listing prints one VM per line: "Name" {uuid}.
+    It "finds the Gateway by prefix" {
+        $listing = @'
+"Whonix-Gateway-Xfce" {11111111-1111-1111-1111-111111111111}
+"Whonix-Workstation-Xfce" {22222222-2222-2222-2222-222222222222}
+'@
+        Resolve-WhonixVmName -VmListOutput $listing -NamePrefix "Whonix-Gateway" |
+            Should -Be "Whonix-Gateway-Xfce"
+    }
+
+    It "finds the Workstation by prefix" {
+        $listing = @'
+"Whonix-Gateway-Xfce" {11111111-1111-1111-1111-111111111111}
+"Whonix-Workstation-Xfce" {22222222-2222-2222-2222-222222222222}
+'@
+        Resolve-WhonixVmName -VmListOutput $listing -NamePrefix "Whonix-Workstation" |
+            Should -Be "Whonix-Workstation-Xfce"
+    }
+
+    It "does not return a Workstation when asked for a Gateway" {
+        $wsOnly = '"Whonix-Workstation-Xfce" {22222222-2222-2222-2222-222222222222}'
+        Resolve-WhonixVmName -VmListOutput $wsOnly -NamePrefix "Whonix-Gateway" |
+            Should -BeNullOrEmpty
+    }
+
+    It "returns null when nothing matches the prefix" {
+        $other = '"Some-Other-VM" {33333333-3333-3333-3333-333333333333}'
+        Resolve-WhonixVmName -VmListOutput $other -NamePrefix "Whonix-Gateway" |
+            Should -BeNullOrEmpty
+    }
+
+    It "returns null on empty listing output" {
+        Resolve-WhonixVmName -VmListOutput "" -NamePrefix "Whonix-Gateway" |
+            Should -BeNullOrEmpty
+    }
+
+    It "picks the canonical VM over a longer clone regardless of order" {
+        $withClone = @'
+"Whonix-Gateway-Xfce Clone" {aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}
+"Whonix-Gateway-Xfce" {11111111-1111-1111-1111-111111111111}
+'@
+        Resolve-WhonixVmName -VmListOutput $withClone -NamePrefix "Whonix-Gateway" |
+            Should -Be "Whonix-Gateway-Xfce"
+
+        # Same answer if VirtualBox happens to list the clone second.
+        $cloneSecond = @'
+"Whonix-Gateway-Xfce" {11111111-1111-1111-1111-111111111111}
+"Whonix-Gateway-Xfce Clone" {aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}
+'@
+        Resolve-WhonixVmName -VmListOutput $cloneSecond -NamePrefix "Whonix-Gateway" |
+            Should -Be "Whonix-Gateway-Xfce"
+    }
+
+    It "prefers an exact prefix match over a longer suffixed name" {
+        $exactAndLong = @'
+"Whonix-Gateway-Xfce" {11111111-1111-1111-1111-111111111111}
+"Whonix-Gateway" {44444444-4444-4444-4444-444444444444}
+'@
+        Resolve-WhonixVmName -VmListOutput $exactAndLong -NamePrefix "Whonix-Gateway" |
+            Should -Be "Whonix-Gateway"
+    }
+}
