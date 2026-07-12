@@ -66,9 +66,10 @@ WhonixAutoSetup/
 ├── configure-vms.ps1      # VM resource allocation and hardening
 ├── start-whonix.ps1       # Ordered VM launch with Tor health check
 ├── lib/
+│   ├── allocation.ps1     # VM RAM/CPU sizing math
 │   ├── logging.ps1        # Shared logging utilities
 │   ├── prereq.ps1         # Resource-threshold math helper
-│   └── vbox.ps1           # VBoxManage.exe locator
+│   └── vbox.ps1           # VBoxManage.exe locator + Whonix VM-name resolver
 ├── tests/                 # Pester 5 unit tests for the lib helpers
 ├── .github/workflows/     # CI: PSScriptAnalyzer + Pester
 ├── logs/                  # Runtime log files (gitignored)

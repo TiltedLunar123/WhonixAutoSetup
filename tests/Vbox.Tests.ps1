@@ -58,6 +58,41 @@ Describe "Find-VBoxManage" {
 
         Find-VBoxManage | Should -Be $shimPath
     }
+
+    It "finds VBoxManage at the default Program Files path when no env vars are set" {
+        # The common case: a stock VirtualBox install, no VBOX_* vars, binary
+        # sitting under 64-bit Program Files.
+        $expected = Join-Path $env:ProgramFiles "Oracle\VirtualBox\VBoxManage.exe"
+        Mock -CommandName Test-Path -ParameterFilter { $Path -eq $expected } -MockWith { $true }
+        Mock -CommandName Test-Path -MockWith { $false }
+
+        Find-VBoxManage | Should -Be $expected
+    }
+
+    It "falls back to the 32-bit Program Files path when the 64-bit path is absent" {
+        $x86 = Join-Path ${env:ProgramFiles(x86)} "Oracle\VirtualBox\VBoxManage.exe"
+        Mock -CommandName Test-Path -ParameterFilter { $Path -eq $x86 } -MockWith { $true }
+        Mock -CommandName Test-Path -MockWith { $false }
+
+        Find-VBoxManage | Should -Be $x86
+    }
+
+    It "lets an explicit VBOX_INSTALL_PATH override win when both env vars are set" {
+        # The README tells people to set VBOX_INSTALL_PATH when the binary lives
+        # somewhere unusual, so that explicit override should beat the MSI var even
+        # when both point at a real binary.
+        $msiPath = [System.IO.Path]::Combine($TestDrive, "msi-vbox")
+        $installPath = [System.IO.Path]::Combine($TestDrive, "explicit-vbox")
+        $env:VBOX_MSI_INSTALL_PATH = $msiPath
+        $env:VBOX_INSTALL_PATH = $installPath
+        $expected = [System.IO.Path]::Combine($installPath, "VBoxManage.exe")
+        $msiExe = [System.IO.Path]::Combine($msiPath, "VBoxManage.exe")
+
+        Mock -CommandName Test-Path -ParameterFilter { $Path -eq $expected -or $Path -eq $msiExe } -MockWith { $true }
+        Mock -CommandName Test-Path -MockWith { $false }
+
+        Find-VBoxManage | Should -Be $expected
+    }
 }
 
 Describe "Resolve-WhonixVmName" {
@@ -121,5 +156,13 @@ Describe "Resolve-WhonixVmName" {
 '@
         Resolve-WhonixVmName -VmListOutput $exactAndLong -NamePrefix "Whonix-Gateway" |
             Should -Be "Whonix-Gateway"
+    }
+
+    It "matches case-sensitively, so a lowercase prefix finds nothing" {
+        # The match uses an Ordinal (case-sensitive) StartsWith on purpose, so a
+        # miscased prefix must not silently resolve to the real VM.
+        $listing = '"Whonix-Gateway-Xfce" {11111111-1111-1111-1111-111111111111}'
+        Resolve-WhonixVmName -VmListOutput $listing -NamePrefix "whonix-gateway" |
+            Should -BeNullOrEmpty
     }
 }
