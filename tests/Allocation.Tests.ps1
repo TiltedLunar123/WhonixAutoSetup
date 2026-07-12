@@ -55,6 +55,28 @@ Describe "Get-VmResourceAllocation" {
             ($a.WorkstationRamMB % 128) | Should -Be 0
             $a.WorkstationRamMB | Should -Be 3712
         }
+
+        It "stays on a 128 MB boundary across a sweep of host sizes" {
+            foreach ($gb in 4, 8, 12, 16, 24, 32, 48, 64, 128) {
+                $a = Get-VmResourceAllocation -TotalRamBytes ([long]($gb * 1GB)) -CpuCores 8
+                ($a.WorkstationRamMB % 128) | Should -Be 0
+            }
+        }
+    }
+
+    Context "Hosts below the reserve floor" {
+        It "holds the Workstation at the 2048 MB floor on a 4 GB host" {
+            # available = 4096 - 4096(host) - 1024(gateway) = -1024 MB before the
+            # floor; the 2048 minimum has to pull it back up out of the negative.
+            $a = Get-VmResourceAllocation -TotalRamBytes ([long](4 * 1GB)) -CpuCores 4
+            $a.WorkstationRamMB | Should -Be 2048
+        }
+
+        It "never returns sub-floor Workstation RAM even on a 2-core 4 GB host" {
+            $a = Get-VmResourceAllocation -TotalRamBytes ([long](4 * 1GB)) -CpuCores 2
+            $a.WorkstationRamMB | Should -BeGreaterOrEqual 2048
+            $a.WorkstationCores | Should -BeGreaterOrEqual 1
+        }
     }
 
     Context "CPU core allocation" {
