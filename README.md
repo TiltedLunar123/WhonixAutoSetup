@@ -159,6 +159,22 @@ All scripts log to `logs/WhonixAutoSetup_<timestamp>.log` with timestamped entri
 | Checksum mismatch | Delete the file from `downloads/` and re-run `setup.ps1` |
 | Tor bootstrap timeout | Increase `-TorTimeoutSeconds` or check Gateway console for errors |
 | VM already exists | The scripts skip import if a VM with that name exists; delete it in VirtualBox to reimport |
+| Extension Pack install warning | Usually the license hash, which Oracle changes per release. Pass the hash VBoxManage names to `setup.ps1 -ExtPackLicenseHash`, or install the pack by hand. Whonix runs without it |
+
+### Saved VMs
+
+Closing a Whonix window with "Save the machine state", which is the default
+button in the VirtualBox close dialog, leaves the VM in `saved` rather than
+powered off. The two scripts treat that state differently, because VirtualBox
+wants different commands to get out of it:
+
+- `start-whonix.ps1` restores the VM from its saved state. Your session comes
+  back where you left it.
+- `configure-vms.ps1` has to discard the saved state before it can change CPU,
+  RAM, or network settings, since VirtualBox will not reconfigure a VM that is
+  holding one. That throws the suspended session away. The script warns before
+  it does this. Boot the VM and shut it down from inside the guest first if you
+  want to keep the session.
 
 ## Development
 
