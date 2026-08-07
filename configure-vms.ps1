@@ -49,6 +49,55 @@ function Invoke-VBoxManage {
 }
 
 # ============================================================
+# Get a VM to powered off, whatever state it starts in
+# ============================================================
+function Stop-VmForConfiguration {
+    <#
+    .SYNOPSIS
+        Brings a VM to powered off so modifyvm will take.
+    .DESCRIPTION
+        modifyvm needs a VM that is not executing. Getting there is not always
+        a poweroff: controlvm poweroff itself needs a VM that IS executing, so
+        on a saved VM it errors out. A saved VM gets to powered off by having
+        its saved state discarded. Resolve-VmPowerOffAction holds that table.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$VBoxManage,
+        [Parameter(Mandatory)] [string]$VMName,
+        [Parameter(Mandatory)] [string]$Label
+    )
+
+    $vmInfo = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $VMName, "--machinereadable") -Description "Reading VM state"
+    if (-not (($vmInfo | Out-String) -match 'VMState="([^"]+)"')) {
+        throw "Could not read the state of $Label VM '$VMName'. Refusing to reconfigure a VM whose state is unknown."
+    }
+    $state = $Matches[1]
+
+    switch (Resolve-VmPowerOffAction -VmState $state) {
+        'none' {
+            Write-Log "$Label VM is already powered off." -Level DEBUG
+        }
+        'poweroff' {
+            Write-Log "$Label VM is $state. Powering off..." -Level WARN
+            Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("controlvm", $VMName, "poweroff") -Description "Powering off $Label"
+            Start-Sleep -Seconds 3
+        }
+        'discardstate' {
+            # Discarding is the only route from saved to poweroff, and it throws
+            # the guest session away. Worth saying out loud rather than doing
+            # quietly, because the user may not expect to lose it.
+            Write-Log "$Label VM is $state. Discarding its saved state so it can be reconfigured..." -Level WARN
+            Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("discardstate", $VMName) -Description "Discarding saved state for $Label"
+            Start-Sleep -Seconds 3
+        }
+        'unsupported' {
+            throw "$Label VM '$VMName' is in state '$state', which cannot be brought to powered off from here. Wait for it to settle, then rerun."
+        }
+    }
+}
+
+# ============================================================
 # Calculate resource allocation
 # ============================================================
 function Get-ResourceAllocation {
@@ -90,13 +139,7 @@ function Set-GatewayConfiguration {
     $vmName = $GatewayVMName
 
     # Ensure VM is powered off
-    $vmInfo = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $vmName, "--machinereadable") -Description "Reading VM state"
-    $stateMatch = ($vmInfo | Out-String) -match 'VMState="([^"]+)"'
-    if ($stateMatch -and $Matches[1] -ne "poweroff") {
-        Write-Log "Gateway VM is running. Powering off..." -Level WARN
-        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("controlvm", $vmName, "poweroff") -Description "Powering off Gateway"
-        Start-Sleep -Seconds 3
-    }
+    Stop-VmForConfiguration -VBoxManage $VBoxManage -VMName $vmName -Label "Gateway"
 
     # CPU and RAM
     Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
@@ -134,13 +177,7 @@ function Set-WorkstationConfiguration {
     $vmName = $WorkstationVMName
 
     # Ensure VM is powered off
-    $vmInfo = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $vmName, "--machinereadable") -Description "Reading VM state"
-    $stateMatch = ($vmInfo | Out-String) -match 'VMState="([^"]+)"'
-    if ($stateMatch -and $Matches[1] -ne "poweroff") {
-        Write-Log "Workstation VM is running. Powering off..." -Level WARN
-        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("controlvm", $vmName, "poweroff") -Description "Powering off Workstation"
-        Start-Sleep -Seconds 3
-    }
+    Stop-VmForConfiguration -VBoxManage $VBoxManage -VMName $vmName -Label "Workstation"
 
     # CPU and RAM
     Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
@@ -185,20 +222,25 @@ function Set-SecurityHardening {
         "modifyvm", $VMName, "--drag-and-drop", "disabled"
     ) -Description "Disabling drag-and-drop"
 
-    # Disable shared folders (remove any that exist)
-    try {
-        $sfOutput = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $VMName, "--machinereadable")
-        $sharedFolders = $sfOutput | Select-String -Pattern 'SharedFolderNameMachineMapping\d+="([^"]+)"'
-        foreach ($sf in $sharedFolders) {
-            $folderName = $sf.Matches[0].Groups[1].Value
-            Write-Log "  Removing shared folder: $folderName" -Level WARN
-            Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
-                "sharedfolder", "remove", $VMName, "--name", $folderName
-            )
-        }
+    # Disable shared folders (remove any that exist).
+    #
+    # No try/catch here on purpose. A VM with no shared folders is not an error
+    # case: showvminfo succeeds and simply has no SharedFolderNameMachineMapping
+    # lines, so the loop does not run. Wrapping this meant a genuine failure to
+    # detach a folder got logged as "No shared folders to remove", which is the
+    # opposite of what happened, in the one function whose entire job is
+    # isolating the guest. A folder we cannot remove should stop the run.
+    $sfOutput = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $VMName, "--machinereadable")
+    $sharedFolders = @($sfOutput | Select-String -Pattern 'SharedFolderNameMachineMapping\d+="([^"]+)"')
+    if ($sharedFolders.Count -eq 0) {
+        Write-Log "  No shared folders present." -Level DEBUG
     }
-    catch {
-        Write-Log "  No shared folders to remove." -Level DEBUG
+    foreach ($sf in $sharedFolders) {
+        $folderName = $sf.Matches[0].Groups[1].Value
+        Write-Log "  Removing shared folder: $folderName" -Level WARN
+        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+            "sharedfolder", "remove", $VMName, "--name", $folderName
+        ) -Description "Removing shared folder '$folderName'"
     }
 
     # Disable USB controllers

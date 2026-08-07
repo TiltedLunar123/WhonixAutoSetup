@@ -166,3 +166,103 @@ Describe "Resolve-WhonixVmName" {
             Should -BeNullOrEmpty
     }
 }
+
+Describe "Resolve-VmStartAction" {
+    It "reports nothing to do for a running VM" {
+        Resolve-VmStartAction -VmState 'running' | Should -Be 'none'
+    }
+
+    It "resumes a paused VM" {
+        Resolve-VmStartAction -VmState 'paused' | Should -Be 'resume'
+    }
+
+    It "restores a saved VM rather than resuming it" {
+        # This is the case that used to break. Closing the Whonix window with
+        # "save the machine state" leaves VMState=saved, and controlvm resume
+        # only works on a paused VM, so the launch died there. startvm is what
+        # brings a saved VM back.
+        Resolve-VmStartAction -VmState 'saved' | Should -Be 'restore'
+    }
+
+    It "restores an aborted-saved VM, since the saved state outlived the process" {
+        Resolve-VmStartAction -VmState 'aborted-saved' | Should -Be 'restore'
+    }
+
+    It "cold boots a powered off VM" {
+        Resolve-VmStartAction -VmState 'poweroff' | Should -Be 'start'
+    }
+
+    It "cold boots an aborted VM, which has no saved state to restore" {
+        Resolve-VmStartAction -VmState 'aborted' | Should -Be 'start'
+    }
+
+    It "refuses to guess at a VM that is mid-transition" {
+        foreach ($state in @('starting', 'stopping', 'saving', 'restoring', 'settingup')) {
+            Resolve-VmStartAction -VmState $state | Should -Be 'unsupported' -Because "$state is transient"
+        }
+    }
+
+    It "refuses to start a wedged VM, which has to be powered off first" {
+        Resolve-VmStartAction -VmState 'stuck' | Should -Be 'unsupported'
+    }
+
+    It "treats an unreadable state as unsupported instead of assuming it is off" {
+        # Get-VMState hands back "unknown" when the VMState line is missing.
+        Resolve-VmStartAction -VmState 'unknown' | Should -Be 'unsupported'
+        Resolve-VmStartAction -VmState '' | Should -Be 'unsupported'
+    }
+
+    It "tolerates the casing and padding VirtualBox might report" {
+        Resolve-VmStartAction -VmState ' Saved ' | Should -Be 'restore'
+        Resolve-VmStartAction -VmState 'RUNNING' | Should -Be 'none'
+    }
+}
+
+Describe "Resolve-VmPowerOffAction" {
+    It "reports nothing to do for a VM that is already off" {
+        Resolve-VmPowerOffAction -VmState 'poweroff' | Should -Be 'none'
+    }
+
+    It "leaves an aborted VM alone, since the process is already gone" {
+        Resolve-VmPowerOffAction -VmState 'aborted' | Should -Be 'none'
+    }
+
+    It "powers off a running VM" {
+        Resolve-VmPowerOffAction -VmState 'running' | Should -Be 'poweroff'
+    }
+
+    It "powers off a paused VM" {
+        Resolve-VmPowerOffAction -VmState 'paused' | Should -Be 'poweroff'
+    }
+
+    It "powers off a wedged VM" {
+        Resolve-VmPowerOffAction -VmState 'stuck' | Should -Be 'poweroff'
+    }
+
+    It "discards the saved state of a saved VM instead of powering it off" {
+        # The other half of the same bug. configure-vms.ps1 wants the VM at
+        # poweroff so modifyvm will take, and controlvm poweroff errors on a VM
+        # that is not executing.
+        Resolve-VmPowerOffAction -VmState 'saved' | Should -Be 'discardstate'
+    }
+
+    It "discards the saved state of an aborted-saved VM" {
+        Resolve-VmPowerOffAction -VmState 'aborted-saved' | Should -Be 'discardstate'
+    }
+
+    It "refuses to guess at a VM that is mid-transition" {
+        foreach ($state in @('starting', 'stopping', 'saving', 'restoring', 'settingup')) {
+            Resolve-VmPowerOffAction -VmState $state | Should -Be 'unsupported' -Because "$state is transient"
+        }
+    }
+
+    It "treats an unreadable state as unsupported instead of assuming it is off" {
+        Resolve-VmPowerOffAction -VmState 'unknown' | Should -Be 'unsupported'
+        Resolve-VmPowerOffAction -VmState '' | Should -Be 'unsupported'
+    }
+
+    It "tolerates the casing and padding VirtualBox might report" {
+        Resolve-VmPowerOffAction -VmState ' Saved ' | Should -Be 'discardstate'
+        Resolve-VmPowerOffAction -VmState 'POWEROFF' | Should -Be 'none'
+    }
+}

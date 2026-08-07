@@ -22,11 +22,18 @@
     SHA-256 hash of the expected VirtualBox installer. When supplied, the
     downloaded installer is verified before execution; mismatch aborts setup.
     Pair this with -VirtualBoxVersion for a fully reproducible install.
+.PARAMETER ExtPackLicenseHash
+    SHA-256 license hash passed to `extpack install --accept-license`. Oracle
+    changes this per Extension Pack release, so the pinned default goes stale
+    whenever a new one ships. VBoxManage prints the expected hash when it
+    rejects the wrong one. The Extension Pack is optional, so a mismatch warns
+    rather than aborting setup.
 .EXAMPLE
     .\setup.ps1
     .\setup.ps1 -WhonixVersion "18.1.4.2" -WhonixEdition "CLI"
     .\setup.ps1 -SkipVBoxInstall
     .\setup.ps1 -VirtualBoxVersion "7.1.4" -VirtualBoxHash "abc123..."
+    .\setup.ps1 -ExtPackLicenseHash "the hash VBoxManage asked for"
 #>
 
 [CmdletBinding()]
@@ -37,7 +44,8 @@ param(
     [string]$DownloadDir = "",
     [switch]$SkipVBoxInstall,
     [string]$VirtualBoxVersion = "",
-    [string]$VirtualBoxHash = ""
+    [string]$VirtualBoxHash = "",
+    [string]$ExtPackLicenseHash = "56be48f923303c8cabbd2e31a14ae6b34f8e5264e630d78e6e1ef4630bd573e0"
 )
 
 Set-StrictMode -Version Latest
@@ -237,9 +245,23 @@ function Install-VirtualBox {
         $vboxManage = Find-VBoxManage
         if ($vboxManage) {
             Write-Log "Installing Extension Pack..."
-            & $vboxManage extpack install --replace --accept-license=56be48f923303c8cabbd2e31a14ae6b34f8e5264e630d78e6e1ef4630bd573e0 $extPackPath 2>&1 |
+            & $vboxManage extpack install --replace --accept-license=$ExtPackLicenseHash $extPackPath 2>&1 |
                 ForEach-Object { Write-Log "  $_" -Level DEBUG }
-            Write-Log "Extension Pack installed." -Level SUCCESS
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Extension Pack installed." -Level SUCCESS
+            }
+            else {
+                # Not fatal. Whonix runs without the Extension Pack, and
+                # configure-vms.ps1 turns USB off during hardening anyway, so
+                # the main thing it would have bought us is switched off by
+                # design. Say so plainly instead of claiming a success.
+                Write-Log "Extension Pack install failed (exit code $LASTEXITCODE). Continuing without it." -Level WARN
+                Write-Log "The most likely cause is the license hash. Oracle changes it per release, and this script pins one value (-ExtPackLicenseHash to override)." -Level WARN
+                Write-Log "To install it by hand: `"$vboxManage`" extpack install --replace `"$extPackPath`"" -Level WARN
+            }
+        }
+        else {
+            Write-Log "Extension Pack downloaded but VBoxManage.exe was not found, so it was not installed." -Level WARN
         }
     }
     else {
