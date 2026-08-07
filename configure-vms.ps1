@@ -222,20 +222,25 @@ function Set-SecurityHardening {
         "modifyvm", $VMName, "--drag-and-drop", "disabled"
     ) -Description "Disabling drag-and-drop"
 
-    # Disable shared folders (remove any that exist)
-    try {
-        $sfOutput = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $VMName, "--machinereadable")
-        $sharedFolders = $sfOutput | Select-String -Pattern 'SharedFolderNameMachineMapping\d+="([^"]+)"'
-        foreach ($sf in $sharedFolders) {
-            $folderName = $sf.Matches[0].Groups[1].Value
-            Write-Log "  Removing shared folder: $folderName" -Level WARN
-            Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
-                "sharedfolder", "remove", $VMName, "--name", $folderName
-            )
-        }
+    # Disable shared folders (remove any that exist).
+    #
+    # No try/catch here on purpose. A VM with no shared folders is not an error
+    # case: showvminfo succeeds and simply has no SharedFolderNameMachineMapping
+    # lines, so the loop does not run. Wrapping this meant a genuine failure to
+    # detach a folder got logged as "No shared folders to remove", which is the
+    # opposite of what happened, in the one function whose entire job is
+    # isolating the guest. A folder we cannot remove should stop the run.
+    $sfOutput = Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @("showvminfo", $VMName, "--machinereadable")
+    $sharedFolders = @($sfOutput | Select-String -Pattern 'SharedFolderNameMachineMapping\d+="([^"]+)"')
+    if ($sharedFolders.Count -eq 0) {
+        Write-Log "  No shared folders present." -Level DEBUG
     }
-    catch {
-        Write-Log "  No shared folders to remove." -Level DEBUG
+    foreach ($sf in $sharedFolders) {
+        $folderName = $sf.Matches[0].Groups[1].Value
+        Write-Log "  Removing shared folder: $folderName" -Level WARN
+        Invoke-VBoxManage -VBoxManage $VBoxManage -Arguments @(
+            "sharedfolder", "remove", $VMName, "--name", $folderName
+        ) -Description "Removing shared folder '$folderName'"
     }
 
     # Disable USB controllers
