@@ -123,8 +123,12 @@ try {
         $vtStatus = "Enabled (Hypervisor present)"
     }
     else {
-        $processor = Get-CimInstance -ClassName Win32_Processor
-        if ($processor.VirtualizationFirmwareEnabled) {
+        # One Win32_Processor instance per socket. Test-VirtualizationFirmwareEnabled
+        # requires every socket to say yes; see the note there for why reading
+        # the property straight off the collection gets this wrong.
+        $firmwareFlags = @(Get-CimInstance -ClassName Win32_Processor |
+            ForEach-Object { $_.VirtualizationFirmwareEnabled })
+        if (Test-VirtualizationFirmwareEnabled -FirmwareEnabledValues $firmwareFlags) {
             $vtEnabled = $true
             $vtStatus = "Enabled (Firmware)"
         }
