@@ -62,22 +62,36 @@ function Start-WhonixVm {
     )
 
     $state = Get-VMState -VBoxManage $VBoxManage -VMName $VMName
-    if ($state -eq "running") {
-        Write-Log "$VMName is already running." -Level WARN
-        return
-    }
+    $action = Resolve-VmStartAction -VmState $state
 
-    if ($state -eq "saved" -or $state -eq "paused") {
-        Write-Log "Resuming $VMName from $state state..."
-        & $VBoxManage controlvm $VMName resume 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to resume $VMName from $state state (exit code $LASTEXITCODE)"
+    switch ($action) {
+        'none' {
+            Write-Log "$VMName is already running." -Level WARN
+            return
         }
-        Write-Log "$VMName resumed." -Level SUCCESS
-        return
+        'resume' {
+            Write-Log "Resuming $VMName from $state state..."
+            & $VBoxManage controlvm $VMName resume 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to resume $VMName from $state state (exit code $LASTEXITCODE)"
+            }
+            Write-Log "$VMName resumed." -Level SUCCESS
+            return
+        }
+        'unsupported' {
+            throw "$VMName is in state '$state', which is not a state this script can start from. Wait for it to settle, or check it in the VirtualBox Manager."
+        }
     }
 
-    Write-Log "Starting $VMName ($Type mode)..."
+    # Left: 'restore' and 'start'. Both are startvm; a saved VM restores from
+    # its saved state, a cold one boots. Saying which one out loud because the
+    # user sees a very different startup either way.
+    if ($action -eq 'restore') {
+        Write-Log "Restoring $VMName from its saved state ($Type mode)..."
+    }
+    else {
+        Write-Log "Starting $VMName ($Type mode)..."
+    }
     & $VBoxManage startvm $VMName --type $Type 2>&1 | ForEach-Object { Write-Log "  $_" -Level DEBUG }
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to start $VMName"
