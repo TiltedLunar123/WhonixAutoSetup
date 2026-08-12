@@ -92,7 +92,7 @@ Custom thresholds:
 
 ### setup.ps1
 
-Downloads and silently installs the latest VirtualBox if not already present. Fetches the Whonix OVA (which bundles both Gateway and Workstation VMs) from official mirrors over HTTPS and verifies the SHA-512 checksum before importing.
+Downloads and silently installs the latest VirtualBox if not already present. Fetches the Whonix OVA (which bundles both Gateway and Workstation VMs) from official mirrors over HTTPS and checks the SHA-512 checksum before importing.
 
 Options:
 ```powershell
@@ -106,7 +106,7 @@ Options:
 ```
 
 > Without `-VirtualBoxVersion` the script fetches whatever `LATEST.TXT`
-> currently advertises, so two runs on different days may install
+> now advertises, so two runs on different days may install
 > different VirtualBox builds. Pair `-VirtualBoxVersion` with
 > `-VirtualBoxHash` (SHA-256) for a reproducible, integrity-checked
 > install; mismatch aborts setup. Without `-VirtualBoxHash` the
