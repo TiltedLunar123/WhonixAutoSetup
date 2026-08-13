@@ -85,6 +85,8 @@ WhonixAutoSetup/
 
 Detects total RAM, CPU cores, free disk space, and hardware virtualization status. Outputs a formatted pass/fail table and blocks setup if minimums are not met.
 
+![Terminal output from a real run. Timestamped lines report RAM of 31.4 GB against a minimum of 8, 24 logical cores against a minimum of 4, 485.1 GB free on C against a minimum of 50, and virtualization enabled with a hypervisor present, each marked PASS. A prerequisite check report table repeats those four rows with detected and required columns, plus a Windows version row marked INFO, and it closes with all checks passed and the system ready for Whonix deployment.](docs/prereq-check.png)
+
 Custom thresholds:
 ```powershell
 .\prereq-check.ps1 -MinRamGB 16 -MinCores 6 -MinDiskGB 80
